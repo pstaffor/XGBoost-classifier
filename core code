@@ -1,0 +1,136 @@
+# --------------------------------------------------------------
+# XGBoost Classifier in R
+# --------------------------------------------------------------
+
+library(xgboost)
+library(caret)
+library(dplyr)
+
+# -----------------------------
+# User parameters
+# -----------------------------
+eta_value       <- 0.1       # learning rate
+max_depth_value <- 4
+nrounds_value   <- 200
+objective_type  <- "binary:logistic"   # do not change for classification
+
+# -----------------------------
+# Load data
+# -----------------------------
+# File must have: ID, Disease, then feature columns
+input_file <- "input_data.txt"
+df <- read.table(input_file, header = TRUE, sep = "\t")
+
+# Disease must be 0/1
+df$Disease <- as.factor(df$Disease)
+
+# Separate features and outcome
+X <- df %>% select(-ID, -Disease)
+y <- df$Disease
+
+# caret requires outcome as factor
+df_model <- data.frame(Disease = y, X)
+
+# -----------------------------
+# XGBoost training control
+# -----------------------------
+xgb_grid <- expand.grid(
+  nrounds = nrounds_value,
+  eta = eta_value,
+  max_depth = max_depth_value,
+  gamma = 0,
+  colsample_bytree = 1,
+  min_child_weight = 1,
+  subsample = 1
+)
+
+set.seed(123)
+
+# -----------------------------
+# Run 5-fold CV
+# -----------------------------
+ctrl5 <- trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final"
+)
+
+model_5fold <- train(
+  Disease ~ .,
+  data = df_model,
+  method = "xgbTree",
+  metric = "ROC",
+  trControl = ctrl5,
+  tuneGrid = xgb_grid
+)
+
+pred5 <- model_5fold$pred
+pred5$predClass <- ifelse(pred5$pos >= 0.5, "pos", "neg")
+
+cm5 <- confusionMatrix(
+  factor(pred5$predClass, levels=c("neg","pos")),
+  factor(pred5$obs, levels=c("neg","pos"))
+)
+
+# -----------------------------
+# Run 10-fold CV
+# -----------------------------
+ctrl10 <- ctrl5
+ctrl10$number <- 10
+
+model_10fold <- train(
+  Disease ~ .,
+  data = df_model,
+  method = "xgbTree",
+  metric = "ROC",
+  trControl = ctrl10,
+  tuneGrid = xgb_grid
+)
+
+pred10 <- model_10fold$pred
+pred10$predClass <- ifelse(pred10$pos >= 0.5, "pos", "neg")
+
+cm10 <- confusionMatrix(
+  factor(pred10$predClass, levels=c("neg","pos")),
+  factor(pred10$obs, levels=c("neg","pos"))
+)
+
+# -----------------------------
+# LOOCV
+# -----------------------------
+ctrlLOO <- trainControl(
+  method = "LOOCV",
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final"
+)
+
+model_LOO <- train(
+  Disease ~ .,
+  data = df_model,
+  method = "xgbTree",
+  metric = "ROC",
+  trControl = ctrlLOO,
+  tuneGrid = xgb_grid
+)
+
+predLOO <- model_LOO$pred
+predLOO$predClass <- ifelse(predLOO$pos >= 0.5, "pos", "neg")
+
+cmLOO <- confusionMatrix(
+  factor(predLOO$predClass, levels=c("neg","pos")),
+  factor(predLOO$obs, levels=c("neg","pos"))
+)
+
+# -----------------------------
+# Output summary
+# -----------------------------
+cat("===== 5-FOLD RESULTS =====\n")
+print(cm5)
+cat("\n\n===== 10-FOLD RESULTS =====\n")
+print(cm10)
+cat("\n\n===== LOOCV RESULTS =====\n")
+print(cmLOO)
+
